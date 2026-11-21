@@ -1,0 +1,2069 @@
+{
+  "info": {
+    "name": "Hotel Offer Orchestrator - assessment verification",
+    "description": "Run every request with baseUrl=http://localhost:3000. Set supplierDown to none, A or B to match startup flags. Valid searches fail entirely with 503 during either outage; invalid searches stay 400. Supplier routes check availability before city validation. Readiness stays 200 during supplier outages. Mismatched modes fail assertions. Use a 40000 ms request timeout. See README for Docker outage/recovery commands.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "supplierDown",
+      "value": "none",
+      "type": "string"
+    }
+  ],
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('supplierDown is none, A or B', function () {",
+          "  pm.expect(pm.variables.get('supplierDown')).to.be.oneOf(['none', 'A', 'B']);",
+          "});",
+          "pm.test('JSON response with generated request ID', function () {",
+          "  pm.expect(pm.response.headers.get('Content-Type')).to.match(/^application\\/json\\b/i);",
+          "  pm.expect(pm.response.headers.get('x-request-id')).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);",
+          "  var body = pm.response.json();",
+          "  pm.expect(body !== null && typeof body === 'object').to.equal(true);",
+          "});"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Service and health",
+      "item": [
+        {
+          "name": "Service index",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Exact service index with optional diagnostic', function () {",
+                  "  var body = pm.response.json();",
+                  "  pm.expect(body).to.have.all.keys('name', 'endpoints');",
+                  "  pm.expect(body.name).to.equal('Hotel Offer Orchestrator');",
+                  "  var expected = { liveness: '/health/live', readiness: '/health/ready', health: '/health', hotels: '/api/hotels', supplierA: '/supplierA/hotels', supplierB: '/supplierB/hotels' };",
+                  "  if (Object.prototype.hasOwnProperty.call(body.endpoints, 'probe')) expected.probe = '/internal/probe';",
+                  "  pm.expect(body.endpoints).to.deep.equal(expected);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Unknown route",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/does-not-exist"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(404); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"NOT_FOUND\",\"message\":\"Endpoint not found\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Liveness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health/live"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"status\":\"up\"};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Infrastructure readiness stays ready during supplier outage",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health/ready"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"status\":\"ready\",\"checks\":{\"api\":\"up\",\"worker\":\"up\",\"temporal\":\"up\",\"redis\":\"up\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Full health matches selected supplier mode",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var mode = pm.variables.get('supplierDown');",
+                  "var checks = {\"api\":\"up\",\"worker\":\"up\",\"temporal\":\"up\",\"redis\":\"up\"};",
+                  "checks.supplierA = mode === 'A' ? 'down' : 'up';",
+                  "checks.supplierB = mode === 'B' ? 'down' : 'up';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(mode === 'none' ? 200 : 503); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = { status: mode === 'none' ? 'ready' : 'not_ready', checks: checks };",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Supplier fixtures and validation",
+      "item": [
+        {
+          "name": "Supplier A - Full fixtures",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierA/hotels"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'A';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : [{\"hotelId\":\"a1\",\"name\":\"Holtin\",\"price\":6000,\"city\":\"delhi\",\"commissionPct\":10},{\"hotelId\":\"a2\",\"name\":\"Radison\",\"price\":5900,\"city\":\"delhi\",\"commissionPct\":13},{\"hotelId\":\"a3\",\"name\":\"Oberoi\",\"price\":7000,\"city\":\"delhi\",\"commissionPct\":15},{\"hotelId\":\"a4\",\"name\":\"MetroStay\",\"price\":4500,\"city\":\"delhi\",\"commissionPct\":12},{\"hotelId\":\"a5\",\"name\":\"Sea View\",\"price\":5200,\"city\":\"mumbai\",\"commissionPct\":10},{\"hotelId\":\"a6\",\"name\":\"Harbour Grand\",\"price\":7800,\"city\":\"mumbai\",\"commissionPct\":12}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"hotelId\",\"name\",\"price\",\"city\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Supplier A - Delhi fixtures",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierA/hotels?city=delhi"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'A';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : [{\"hotelId\":\"a1\",\"name\":\"Holtin\",\"price\":6000,\"city\":\"delhi\",\"commissionPct\":10},{\"hotelId\":\"a2\",\"name\":\"Radison\",\"price\":5900,\"city\":\"delhi\",\"commissionPct\":13},{\"hotelId\":\"a3\",\"name\":\"Oberoi\",\"price\":7000,\"city\":\"delhi\",\"commissionPct\":15},{\"hotelId\":\"a4\",\"name\":\"MetroStay\",\"price\":4500,\"city\":\"delhi\",\"commissionPct\":12}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"hotelId\",\"name\",\"price\",\"city\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Supplier A - Mumbai fixtures",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierA/hotels?city=mumbai"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'A';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : [{\"hotelId\":\"a5\",\"name\":\"Sea View\",\"price\":5200,\"city\":\"mumbai\",\"commissionPct\":10},{\"hotelId\":\"a6\",\"name\":\"Harbour Grand\",\"price\":7800,\"city\":\"mumbai\",\"commissionPct\":12}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"hotelId\",\"name\",\"price\",\"city\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Supplier A - Normalized city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierA/hotels?city=%20DELHI%20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'A';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : [{\"hotelId\":\"a1\",\"name\":\"Holtin\",\"price\":6000,\"city\":\"delhi\",\"commissionPct\":10},{\"hotelId\":\"a2\",\"name\":\"Radison\",\"price\":5900,\"city\":\"delhi\",\"commissionPct\":13},{\"hotelId\":\"a3\",\"name\":\"Oberoi\",\"price\":7000,\"city\":\"delhi\",\"commissionPct\":15},{\"hotelId\":\"a4\",\"name\":\"MetroStay\",\"price\":4500,\"city\":\"delhi\",\"commissionPct\":12}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"hotelId\",\"name\",\"price\",\"city\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Supplier A - Unknown city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierA/hotels?city=chennai"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'A';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : [];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"hotelId\",\"name\",\"price\",\"city\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Supplier A - Blank city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierA/hotels?city="
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'A';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid supplier city query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Supplier A - Whitespace city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierA/hotels?city=%20%20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'A';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid supplier city query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Supplier A - Repeated city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierA/hotels?city=delhi&city=mumbai"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'A';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid supplier city query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Supplier A - Structured city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierA/hotels?city[name]=delhi"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'A';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid supplier city query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Supplier A - Array city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierA/hotels?city[]=delhi"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'A';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid supplier city query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Supplier B - Full fixtures",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierB/hotels"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'B';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : [{\"hotelId\":\"b1\",\"name\":\"Holtin\",\"price\":5340,\"city\":\"delhi\",\"commissionPct\":20},{\"hotelId\":\"b2\",\"name\":\"Radison\",\"price\":6200,\"city\":\"delhi\",\"commissionPct\":15},{\"hotelId\":\"b3\",\"name\":\"Oberoi\",\"price\":7000,\"city\":\"delhi\",\"commissionPct\":18},{\"hotelId\":\"b4\",\"name\":\"CityInn\",\"price\":4800,\"city\":\"delhi\",\"commissionPct\":14},{\"hotelId\":\"b5\",\"name\":\"Sea View\",\"price\":5000,\"city\":\"mumbai\",\"commissionPct\":18},{\"hotelId\":\"b6\",\"name\":\"West End\",\"price\":6400,\"city\":\"mumbai\",\"commissionPct\":14}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"hotelId\",\"name\",\"price\",\"city\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Supplier B - Delhi fixtures",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierB/hotels?city=delhi"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'B';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : [{\"hotelId\":\"b1\",\"name\":\"Holtin\",\"price\":5340,\"city\":\"delhi\",\"commissionPct\":20},{\"hotelId\":\"b2\",\"name\":\"Radison\",\"price\":6200,\"city\":\"delhi\",\"commissionPct\":15},{\"hotelId\":\"b3\",\"name\":\"Oberoi\",\"price\":7000,\"city\":\"delhi\",\"commissionPct\":18},{\"hotelId\":\"b4\",\"name\":\"CityInn\",\"price\":4800,\"city\":\"delhi\",\"commissionPct\":14}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"hotelId\",\"name\",\"price\",\"city\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Supplier B - Mumbai fixtures",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierB/hotels?city=mumbai"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'B';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : [{\"hotelId\":\"b5\",\"name\":\"Sea View\",\"price\":5000,\"city\":\"mumbai\",\"commissionPct\":18},{\"hotelId\":\"b6\",\"name\":\"West End\",\"price\":6400,\"city\":\"mumbai\",\"commissionPct\":14}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"hotelId\",\"name\",\"price\",\"city\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Supplier B - Normalized city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierB/hotels?city=%20DELHI%20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'B';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : [{\"hotelId\":\"b1\",\"name\":\"Holtin\",\"price\":5340,\"city\":\"delhi\",\"commissionPct\":20},{\"hotelId\":\"b2\",\"name\":\"Radison\",\"price\":6200,\"city\":\"delhi\",\"commissionPct\":15},{\"hotelId\":\"b3\",\"name\":\"Oberoi\",\"price\":7000,\"city\":\"delhi\",\"commissionPct\":18},{\"hotelId\":\"b4\",\"name\":\"CityInn\",\"price\":4800,\"city\":\"delhi\",\"commissionPct\":14}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"hotelId\",\"name\",\"price\",\"city\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Supplier B - Unknown city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierB/hotels?city=chennai"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'B';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : [];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"hotelId\",\"name\",\"price\",\"city\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Supplier B - Blank city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierB/hotels?city="
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'B';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid supplier city query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Supplier B - Whitespace city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierB/hotels?city=%20%20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'B';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid supplier city query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Supplier B - Repeated city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierB/hotels?city=delhi&city=mumbai"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'B';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid supplier city query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Supplier B - Structured city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierB/hotels?city[name]=delhi"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'B';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid supplier city query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Supplier B - Array city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/supplierB/hotels?city[]=delhi"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') === 'B';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"SUPPLIER_UNAVAILABLE\",\"message\":\"Supplier is unavailable\"}} : {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid supplier city query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Hotel winners and price ranges",
+      "item": [
+        {
+          "name": "Delhi winners, tie and exclusives",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [{\"name\":\"MetroStay\",\"price\":4500,\"supplier\":\"Supplier A\",\"commissionPct\":12},{\"name\":\"CityInn\",\"price\":4800,\"supplier\":\"Supplier B\",\"commissionPct\":14},{\"name\":\"Holtin\",\"price\":5340,\"supplier\":\"Supplier B\",\"commissionPct\":20},{\"name\":\"Radison\",\"price\":5900,\"supplier\":\"Supplier A\",\"commissionPct\":13},{\"name\":\"Oberoi\",\"price\":7000,\"supplier\":\"Supplier A\",\"commissionPct\":15}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});",
+                  "if (!down) {",
+                  "  pm.test('Holtin B 5340/20 and Radison A 5900/13 win', function () {",
+                  "    var offers = pm.response.json();",
+                  "    pm.expect(offers[2]).to.deep.equal({\"name\":\"Holtin\",\"price\":5340,\"supplier\":\"Supplier B\",\"commissionPct\":20});",
+                  "    pm.expect(offers[3]).to.deep.equal({\"name\":\"Radison\",\"price\":5900,\"supplier\":\"Supplier A\",\"commissionPct\":13});",
+                  "  });",
+                  "  pm.test('Oberoi tie selects A; MetroStay and CityInn remain', function () {",
+                  "    var offers = pm.response.json();",
+                  "    pm.expect(offers[4]).to.deep.equal({\"name\":\"Oberoi\",\"price\":7000,\"supplier\":\"Supplier A\",\"commissionPct\":15});",
+                  "    pm.expect(offers.slice(0, 2)).to.deep.equal([{\"name\":\"MetroStay\",\"price\":4500,\"supplier\":\"Supplier A\",\"commissionPct\":12},{\"name\":\"CityInn\",\"price\":4800,\"supplier\":\"Supplier B\",\"commissionPct\":14}]);",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Mumbai winners and exclusives",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=mumbai"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [{\"name\":\"Sea View\",\"price\":5000,\"supplier\":\"Supplier B\",\"commissionPct\":18},{\"name\":\"West End\",\"price\":6400,\"supplier\":\"Supplier B\",\"commissionPct\":14},{\"name\":\"Harbour Grand\",\"price\":7800,\"supplier\":\"Supplier A\",\"commissionPct\":12}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Normalized Delhi",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=%20DELHI%20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [{\"name\":\"MetroStay\",\"price\":4500,\"supplier\":\"Supplier A\",\"commissionPct\":12},{\"name\":\"CityInn\",\"price\":4800,\"supplier\":\"Supplier B\",\"commissionPct\":14},{\"name\":\"Holtin\",\"price\":5340,\"supplier\":\"Supplier B\",\"commissionPct\":20},{\"name\":\"Radison\",\"price\":5900,\"supplier\":\"Supplier A\",\"commissionPct\":13},{\"name\":\"Oberoi\",\"price\":7000,\"supplier\":\"Supplier A\",\"commissionPct\":15}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Normalized Mumbai",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=%20MuMbAi%20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [{\"name\":\"Sea View\",\"price\":5000,\"supplier\":\"Supplier B\",\"commissionPct\":18},{\"name\":\"West End\",\"price\":6400,\"supplier\":\"Supplier B\",\"commissionPct\":14},{\"name\":\"Harbour Grand\",\"price\":7800,\"supplier\":\"Supplier A\",\"commissionPct\":12}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Unknown city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=chennai"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Minimum only inclusive",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=5340"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [{\"name\":\"Holtin\",\"price\":5340,\"supplier\":\"Supplier B\",\"commissionPct\":20},{\"name\":\"Radison\",\"price\":5900,\"supplier\":\"Supplier A\",\"commissionPct\":13},{\"name\":\"Oberoi\",\"price\":7000,\"supplier\":\"Supplier A\",\"commissionPct\":15}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Maximum only inclusive",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&maxPrice=5900"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [{\"name\":\"MetroStay\",\"price\":4500,\"supplier\":\"Supplier A\",\"commissionPct\":12},{\"name\":\"CityInn\",\"price\":4800,\"supplier\":\"Supplier B\",\"commissionPct\":14},{\"name\":\"Holtin\",\"price\":5340,\"supplier\":\"Supplier B\",\"commissionPct\":20},{\"name\":\"Radison\",\"price\":5900,\"supplier\":\"Supplier A\",\"commissionPct\":13}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Combined range",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=5000&maxPrice=6000"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [{\"name\":\"Holtin\",\"price\":5340,\"supplier\":\"Supplier B\",\"commissionPct\":20},{\"name\":\"Radison\",\"price\":5900,\"supplier\":\"Supplier A\",\"commissionPct\":13}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Both endpoints inclusive",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=4800&maxPrice=5900"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [{\"name\":\"CityInn\",\"price\":4800,\"supplier\":\"Supplier B\",\"commissionPct\":14},{\"name\":\"Holtin\",\"price\":5340,\"supplier\":\"Supplier B\",\"commissionPct\":20},{\"name\":\"Radison\",\"price\":5900,\"supplier\":\"Supplier A\",\"commissionPct\":13}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Equal bounds match",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=5340&maxPrice=5340"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [{\"name\":\"Holtin\",\"price\":5340,\"supplier\":\"Supplier B\",\"commissionPct\":20}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Equal bounds empty",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=5500&maxPrice=5500"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Zero minimum",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=0"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [{\"name\":\"MetroStay\",\"price\":4500,\"supplier\":\"Supplier A\",\"commissionPct\":12},{\"name\":\"CityInn\",\"price\":4800,\"supplier\":\"Supplier B\",\"commissionPct\":14},{\"name\":\"Holtin\",\"price\":5340,\"supplier\":\"Supplier B\",\"commissionPct\":20},{\"name\":\"Radison\",\"price\":5900,\"supplier\":\"Supplier A\",\"commissionPct\":13},{\"name\":\"Oberoi\",\"price\":7000,\"supplier\":\"Supplier A\",\"commissionPct\":15}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Zero maximum",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&maxPrice=0"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Equal zero bounds",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=0&maxPrice=0"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Fractional prices",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=5339.99&maxPrice=5340.01"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [{\"name\":\"Holtin\",\"price\":5340,\"supplier\":\"Supplier B\",\"commissionPct\":20}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Scientific prices",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=5e3&maxPrice=6e3"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [{\"name\":\"Holtin\",\"price\":5340,\"supplier\":\"Supplier B\",\"commissionPct\":20},{\"name\":\"Radison\",\"price\":5900,\"supplier\":\"Supplier A\",\"commissionPct\":13}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Trimmed prices",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=%205000%20&maxPrice=%206000%20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [{\"name\":\"Holtin\",\"price\":5340,\"supplier\":\"Supplier B\",\"commissionPct\":20},{\"name\":\"Radison\",\"price\":5900,\"supplier\":\"Supplier A\",\"commissionPct\":13}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Empty range between prices",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=6001&maxPrice=6999"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Empty range above prices",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=8000"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Empty range below prices",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&maxPrice=4499.99"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Mumbai inclusive bounds",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=mumbai&minPrice=5000&maxPrice=6400"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var down = pm.variables.get('supplierDown') !== 'none';",
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(down ? 503 : 200); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = down ? {\"error\":{\"code\":\"HOTEL_SEARCH_UNAVAILABLE\",\"message\":\"Hotel search is unavailable\"}} : [{\"name\":\"Sea View\",\"price\":5000,\"supplier\":\"Supplier B\",\"commissionPct\":18},{\"name\":\"West End\",\"price\":6400,\"supplier\":\"Supplier B\",\"commissionPct\":14}];",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  if (Array.isArray(actual)) actual.forEach(function (entry) { pm.expect(entry).to.have.all.keys([\"name\",\"price\",\"supplier\",\"commissionPct\"]); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Invalid hotel queries",
+      "item": [
+        {
+          "name": "Missing city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Blank city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city="
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Whitespace city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=%20%20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Repeated city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&city=mumbai"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Structured city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city[name]=delhi"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Array city",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city[]=delhi"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Inverted bounds",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=6000&maxPrice=5000"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Blank minPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice="
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Whitespace minPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=%20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Malformed minPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=abc"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Hexadecimal minPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=0x10"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Negative minPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=-1"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Non-finite Infinity minPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=Infinity"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Non-finite NaN minPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=NaN"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Overflow minPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=1e309"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Repeated minPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice=5000&minPrice=6000"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Structured minPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice[value]=5000"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Array minPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&minPrice[]=5000"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Blank maxPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&maxPrice="
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Whitespace maxPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&maxPrice=%20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Malformed maxPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&maxPrice=abc"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Hexadecimal maxPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&maxPrice=0x10"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Negative maxPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&maxPrice=-1"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Non-finite Infinity maxPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&maxPrice=Infinity"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Non-finite NaN maxPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&maxPrice=NaN"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Overflow maxPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&maxPrice=1e309"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Repeated maxPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&maxPrice=5000&maxPrice=6000"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Structured maxPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&maxPrice[value]=5000"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Array maxPrice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/hotels?city=delhi&maxPrice[]=5000"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Exact JSON fields, values and array ordering', function () {",
+                  "  var expected = {\"error\":{\"code\":\"INVALID_QUERY\",\"message\":\"Invalid hotel search query\"}};",
+                  "  var actual = pm.response.json();",
+                  "  pm.expect(actual).to.deep.equal(expected);",
+                  "  ",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    }
+  ]
+}

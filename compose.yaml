@@ -1,0 +1,97 @@
+name: hotel-offer-orchestrator
+
+x-application: &application
+  image: hotel-offer-orchestrator:local
+  build: .
+  platform: linux/amd64
+  stop_grace_period: 12s
+
+x-connections: &connections
+  NODE_ENV: production
+  TEMPORAL_ADDRESS: temporal:7233
+  TEMPORAL_NAMESPACE: default
+  TEMPORAL_TASK_QUEUE: hotel-offers
+  REDIS_URL: redis://redis:6379
+
+services:
+  redis:
+    image: redis:7-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
+    command: [redis-server, --save, '', --appendonly, 'no']
+    ports:
+      - '127.0.0.1:6379:6379'
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 2s
+      retries: 12
+
+  temporal:
+    <<: *application
+    profiles: [local]
+    command: [temporal, server, start-dev, --ip, 0.0.0.0, --headless]
+    ports:
+      - '127.0.0.1:7233:7233'
+    healthcheck:
+      test: [CMD, temporal, operator, cluster, health, --address, 127.0.0.1:7233]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  worker:
+    <<: *application
+    profiles: [local]
+    environment:
+      <<: *connections
+      APP_MODE: worker
+      SUPPLIER_A_URL: http://api:3000/supplierA/hotels
+      SUPPLIER_B_URL: http://api:3000/supplierB/hotels
+    depends_on:
+      redis:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+
+  api:
+    <<: *application
+    profiles: [local]
+    environment:
+      <<: *connections
+      APP_MODE: api
+      PORT: '3000'
+      ENABLE_INFRA_PROBE: 'true'
+      SUPPLIER_A_DOWN: '${SUPPLIER_A_DOWN:-false}'
+      SUPPLIER_B_DOWN: '${SUPPLIER_B_DOWN:-false}'
+    ports:
+      - '127.0.0.1:3000:3000'
+    depends_on:
+      redis:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, --max-time, '2', 'http://127.0.0.1:3000/health/ready']
+      interval: 5s
+      timeout: 3s
+      retries: 18
+
+  demo:
+    <<: *application
+    profiles: [demo]
+    environment:
+      APP_MODE: demo
+      NODE_ENV: production
+      PORT: '3000'
+      REDIS_URL: redis://redis:6379
+      ENABLE_INFRA_PROBE: 'true'
+      SUPPLIER_A_DOWN: '${SUPPLIER_A_DOWN:-false}'
+      SUPPLIER_B_DOWN: '${SUPPLIER_B_DOWN:-false}'
+    ports:
+      - '127.0.0.1:3000:3000'
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, --max-time, '2', 'http://127.0.0.1:3000/health/ready']
+      interval: 5s
+      timeout: 3s
+      retries: 18
