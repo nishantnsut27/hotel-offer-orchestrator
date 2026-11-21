@@ -6,7 +6,7 @@ Repository: https://github.com/nishantnsut27/hotel-offer-orchestrator
 
 ## Docker quickstart
 
-Prerequisites: Git and a running Docker Engine with Docker Compose v2 (`--wait` support), Linux containers, and internet access for pinned image/package downloads. On Windows, use Docker Desktop with its WSL 2 backend. Host ports 3000, 6379, and 7233 must be available. Node.js 22 LTS (22.13 or newer within 22.x) and npm are needed for CLI verification and host development, but Docker builds include Node.
+Prerequisites: Git and a running Docker Engine with Docker Compose v2 (`--wait` support), Linux containers, and internet access for pinned image/package downloads. On Windows, use Docker Desktop with its WSL 2 backend. Host ports 4000, 6379, and 7233 must be available. Node.js 22 LTS (22.13 or newer within 22.x) and npm are needed for CLI verification and host development, but Docker builds include Node.
 
 From a clean checkout:
 
@@ -15,8 +15,8 @@ git clone https://github.com/nishantnsut27/hotel-offer-orchestrator.git
 cd hotel-offer-orchestrator
 docker compose --profile local up --build --wait
 docker compose ps
-curl "http://localhost:3000/health"
-curl "http://localhost:3000/api/hotels?city=delhi&minPrice=5000&maxPrice=6000"
+curl "http://localhost:4000/health"
+curl "http://localhost:4000/api/hotels?city=delhi&minPrice=5000&maxPrice=6000"
 ```
 
 In PowerShell, use `curl.exe` for curl examples and `npm.cmd` for npm commands, including forwarded Newman flags. No `.env` file is needed for Docker quickstart. The local profile runs separate API, worker, Temporal development-server, and Redis containers. Published ports bind to loopback. Temporal runs headless; port 7233 is its gRPC endpoint, not a web page.
@@ -130,14 +130,14 @@ npm run validate:postman
 npm run test:postman
 ```
 
-Import [the collection](postman/hotel-offer-orchestrator.postman_collection.json) into Postman. Its collection variables are `baseUrl=http://localhost:3000` and `supplierDown=none`. Run the entire collection with a 40000 ms request timeout. During an outage set `supplierDown` to `A` or `B` to match the server; mode/configuration mismatches fail assertions.
+Import [the collection](postman/hotel-offer-orchestrator.postman_collection.json) into Postman. Its collection variables are `baseUrl=http://localhost:4000` and `supplierDown=none`. Run the entire collection with a 40000 ms request timeout. During an outage set `supplierDown` to `A` or `B` to match the server; mode/configuration mismatches fail assertions.
 
 The 75 requests assert request IDs, JSON shapes, exact fixture fields/values/order, Delhi/Mumbai winners, the Oberoi tie, supplier-exclusive hotels, normalized/unknown cities, inclusive/open/equal/zero/fractional/scientific/empty ranges, invalid queries, service index, unknown routes, and all three health endpoints. The complete collection must pass in each correctly configured mode.
 
 Newman 6.2.3 runs the CLI checks. Ajv 6.15.0 validates against the bundled [official Postman v2.1 schema](postman/schema/collection-v2.1.0.json) using its Draft 4 dialect offline. Schema source: https://schema.getpostman.com/json/collection/v2.1.0/collection.json. `test:postman` validates before executing and sets a forty-second request timeout. Standard Newman arguments pass through npm:
 
 ```sh
-npm run test:postman -- --env-var baseUrl=http://127.0.0.1:3000 --env-var supplierDown=none
+npm run test:postman -- --env-var baseUrl=http://127.0.0.1:4000 --env-var supplierDown=none
 ```
 
 Postman variables do not change server flags. Configure those separately below.
@@ -184,7 +184,7 @@ Settings are validated once at startup. Docker supplies service URLs. Host proce
 
 | Variable              | Default / purpose                                  |
 | --------------------- | -------------------------------------------------- |
-| `PORT`                | `3000`, HTTP listener                              |
+| `PORT`                | `4000`, HTTP listener                              |
 | `NODE_ENV`            | `development`; Docker uses `production`            |
 | `LOG_LEVEL`           | `info`; `debug`, `info`, `warn`, `error` supported |
 | `APP_MODE`            | `api`; also `worker` and combined `demo`           |
@@ -199,7 +199,7 @@ Settings are validated once at startup. Docker supplies service URLs. Host proce
 | `SUPPLIER_B_DOWN`     | `false`; `true` disables mock Supplier B           |
 | `ENABLE_INFRA_PROBE`  | `false`; Compose enables the local diagnostic      |
 
-Docker workers use `http://api:3000` supplier URLs. Host workers must use loopback URLs. Keep the diagnostic disabled for public deployments.
+Docker workers use `http://api:4000` supplier URLs. Host workers must use loopback URLs. Keep the diagnostic disabled for public deployments.
 
 ## Host development and built-server startup
 

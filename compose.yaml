@@ -43,8 +43,8 @@ services:
     environment:
       <<: *connections
       APP_MODE: worker
-      SUPPLIER_A_URL: http://api:3000/supplierA/hotels
-      SUPPLIER_B_URL: http://api:3000/supplierB/hotels
+      SUPPLIER_A_URL: http://api:4000/supplierA/hotels
+      SUPPLIER_B_URL: http://api:4000/supplierB/hotels
     depends_on:
       redis:
         condition: service_healthy
@@ -57,19 +57,19 @@ services:
     environment:
       <<: *connections
       APP_MODE: api
-      PORT: '3000'
+      PORT: '4000'
       ENABLE_INFRA_PROBE: 'true'
       SUPPLIER_A_DOWN: '${SUPPLIER_A_DOWN:-false}'
       SUPPLIER_B_DOWN: '${SUPPLIER_B_DOWN:-false}'
     ports:
-      - '127.0.0.1:3000:3000'
+      - '127.0.0.1:4000:4000'
     depends_on:
       redis:
         condition: service_healthy
       temporal:
         condition: service_healthy
     healthcheck:
-      test: [CMD, curl, --fail, --silent, --max-time, '2', 'http://127.0.0.1:3000/health/ready']
+      test: [CMD, curl, --fail, --silent, --max-time, '2', 'http://127.0.0.1:4000/health/ready']
       interval: 5s
       timeout: 3s
       retries: 18
@@ -80,18 +80,18 @@ services:
     environment:
       APP_MODE: demo
       NODE_ENV: production
-      PORT: '3000'
+      PORT: '4000'
       REDIS_URL: redis://redis:6379
       ENABLE_INFRA_PROBE: 'true'
       SUPPLIER_A_DOWN: '${SUPPLIER_A_DOWN:-false}'
       SUPPLIER_B_DOWN: '${SUPPLIER_B_DOWN:-false}'
     ports:
-      - '127.0.0.1:3000:3000'
+      - '127.0.0.1:4000:4000'
     depends_on:
       redis:
         condition: service_healthy
     healthcheck:
-      test: [CMD, curl, --fail, --silent, --max-time, '2', 'http://127.0.0.1:3000/health/ready']
+      test: [CMD, curl, --fail, --silent, --max-time, '2', 'http://127.0.0.1:4000/health/ready']
       interval: 5s
       timeout: 3s
       retries: 18

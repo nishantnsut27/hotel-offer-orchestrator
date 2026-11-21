@@ -26,6 +26,6 @@ COPY --from=build --chown=node:node /app/dist ./dist
 COPY --chown=node:node package.json ./
 ENV NODE_ENV=production
 USER node
-EXPOSE 3000
+EXPOSE 4000
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "dist/main.js"]

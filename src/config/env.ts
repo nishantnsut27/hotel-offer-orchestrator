@@ -14,7 +14,7 @@ const environmentSchema = z
       .regex(/^\d+$/)
       .transform(Number)
       .pipe(z.number().int().min(1).max(65535))
-      .default(3000),
+      .default(4000),
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     LOG_LEVEL: z.enum(logLevels).default('info'),
     APP_MODE: z.enum(['api', 'worker', 'demo']).default('api'),

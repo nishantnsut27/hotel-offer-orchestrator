@@ -1,13 +1,13 @@
 {
   "info": {
     "name": "Hotel Offer Orchestrator - assessment verification",
-    "description": "Run every request with baseUrl=http://localhost:3000. Set supplierDown to none, A or B to match startup flags. Valid searches fail entirely with 503 during either outage; invalid searches stay 400. Supplier routes check availability before city validation. Readiness stays 200 during supplier outages. Mismatched modes fail assertions. Use a 40000 ms request timeout. See README for Docker outage/recovery commands.",
+    "description": "Run every request with baseUrl=http://localhost:4000. Set supplierDown to none, A or B to match startup flags. Valid searches fail entirely with 503 during either outage; invalid searches stay 400. Supplier routes check availability before city validation. Readiness stays 200 during supplier outages. Mismatched modes fail assertions. Use a 40000 ms request timeout. See README for Docker outage/recovery commands.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost:3000",
+      "value": "http://localhost:4000",
       "type": "string"
     },
     {
