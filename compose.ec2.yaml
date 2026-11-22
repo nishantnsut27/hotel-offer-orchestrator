@@ -1,0 +1,47 @@
+name: hotel-offer-orchestrator-ec2
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
+services:
+  redis:
+    image: redis:7-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
+    command: [redis-server, --save, '', --appendonly, 'no']
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 2s
+      retries: 12
+
+  app:
+    image: hotel-offer-orchestrator:ec2
+    build: .
+    platform: linux/amd64
+    restart: unless-stopped
+    stop_grace_period: 12s
+    logging: *logging
+    environment:
+      APP_MODE: demo
+      NODE_ENV: production
+      PORT: '4000'
+      TEMPORAL_ADDRESS: 127.0.0.1:7233
+      REDIS_URL: redis://redis:6379
+      ENABLE_INFRA_PROBE: 'false'
+      SUPPLIER_A_DOWN: 'false'
+      SUPPLIER_B_DOWN: 'false'
+    ports:
+      - '${HTTP_BIND_ADDRESS:-0.0.0.0}:${HTTP_PORT:-80}:4000'
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, --max-time, '2', 'http://127.0.0.1:4000/health/ready']
+      start_period: 60s
+      interval: 5s
+      timeout: 3s
+      retries: 18

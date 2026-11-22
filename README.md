@@ -288,4 +288,120 @@ Stop the active local profile:
 docker compose --profile local down
 ```
 
-For the combined profile use `docker compose --profile demo down`. Temporal development-server history and Redis contents are ephemeral, including across container recreation. This is an assessment demo with no production durability claim. Public cloud hosting, external cron, and paid resources are outside the submission scope.
+For the combined profile use `docker compose --profile demo down`. Temporal development-server history and Redis contents are ephemeral, including across container recreation. This is an assessment demo with no production durability claim. Public cloud hosting is optional for the assessment; the EC2 guide below is provided for an owner-managed demo. External cron is not required.
+
+## Optional public deployment on AWS EC2
+
+`compose.ec2.yaml` runs the existing combined demo (API, worker, and loopback-only Temporal) plus a private Redis container. Only HTTP is published, on host port 80 by default. Redis and Temporal have no published host ports, the infrastructure diagnostic is disabled, logs rotate, and both containers restart after a Docker/host restart. The Compose project has a separate name from the local deployment.
+
+The configuration is verified with Docker locally. Creating an EC2 instance, configuring AWS networking, and testing a public URL must still be done in your AWS account; this repository does not provision resources or claim a verified AWS deployment.
+
+### Choose a hosting option
+
+Provider information checked on 2026-11-22:
+
+| Option                                      | Fit for this application                                  | Cost / limitation                                                                                                                                                                                                                      |
+| ------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AWS EC2 with your new-account credits       | Recommended for this demo; runs the complete Docker stack | New accounts receive $100 initially and can earn more. Free-plan access ends after six months or when credits run out, whichever comes first. A paid-plan account can incur charges after credits.                                     |
+| Render Free web service plus Free Key Value | A possible experiment, not a verified deployment target   | Free web compute has 512 MB RAM and sleeps after 15 minutes without inbound traffic. API, worker, and Temporal would share that memory; this configuration has not been tested under that limit. Free Key Value loses data on restart. |
+| Local Docker with a temporary public tunnel | Useful for a short demonstration                          | Your computer and Docker must remain running; tunnel availability and limits depend on the provider.                                                                                                                                   |
+
+Sources: [AWS Free Tier](https://aws.amazon.com/free/), [AWS account plans](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/free-tier-plans.html), [Render Free](https://render.com/docs/free), and [Render pricing](https://render.com/pricing). Credits are shared with your other AWS project. In AWS Billing, check **account plan**, **remaining credits**, and **credit expiry** before launching anything. Instance compute, EBS storage, public IPv4, and data transfer can consume credits. Do not upgrade the account plan just to follow this guide.
+
+### 1. Launch a separate EC2 demo instance
+
+Use a separate instance to leave an existing deployment untouched. In the EC2 console, choose **Launch instance**:
+
+- Name: `hotel-offer-orchestrator`.
+- AMI: official Ubuntu Server 24.04 LTS, **64-bit x86**.
+- Instance: start with `t3.small` (2 vCPU, 2 GiB RAM) if your account plan allows it. This is a practical starting size, not a measured AWS capacity guarantee. Avoid ARM/Graviton instances (`t4g`): the current Dockerfile downloads an amd64 Temporal CLI. Confirm the console's estimate and credit eligibility.
+- Key pair: create/download a `.pem` key and keep it private.
+- Storage: 20 GiB gp3, with **Delete on termination** enabled for this demo.
+- Network: a public subnet with internet access and a public IPv4 address.
+- Security group: SSH/TCP 22 from **My IP** only; HTTP/TCP 80 from `0.0.0.0/0` for a public demo. Do not add inbound rules for 6379, 7233, or 4000. No load balancer, NAT gateway, or Elastic IP is needed for this direct-IP demo.
+
+If you reuse an existing instance, first confirm sufficient free memory/disk and available ports. Run this stack in its own checkout with `HTTP_PORT=8080` if port 80 is already occupied, and allow only that HTTP port in its security group. Do not stop, replace, or modify the other application's containers.
+
+### 2. Connect to Ubuntu
+
+Use EC2 **Connect** for the connection command. From PowerShell, replace the placeholders:
+
+```powershell
+ssh -i "C:\path\hotel-demo.pem" ubuntu@YOUR_EC2_PUBLIC_IP
+```
+
+The remaining installation/deployment commands run in the Ubuntu SSH session. On an existing server with Docker Engine and Compose v2 already installed, skip the installation block and check their versions instead.
+
+### 3. Install Docker Engine and Compose v2
+
+For a fresh Ubuntu 24.04 instance, use the [official Docker Apt repository](https://docs.docker.com/engine/install/ubuntu/):
+
+```sh
+sudo apt update
+sudo apt install -y ca-certificates curl git
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+sudo tee /etc/apt/sources.list.d/docker.sources > /dev/null <<'EOF'
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: noble
+Components: stable
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now docker
+sudo docker version
+sudo docker compose version
+```
+
+No host Node.js installation, npm installation, or `.env` file is needed for the Docker deployment.
+
+### 4. Clone and start the application
+
+```sh
+git clone https://github.com/nishantnsut27/hotel-offer-orchestrator.git
+cd hotel-offer-orchestrator
+sudo docker compose -f compose.ec2.yaml up --build --wait --wait-timeout 180
+sudo docker compose -f compose.ec2.yaml ps
+curl --fail http://127.0.0.1/health
+curl --fail "http://127.0.0.1/api/hotels?city=delhi&minPrice=5000&maxPrice=6000"
+```
+
+Expected health: HTTP 200, with API, worker, Temporal, Redis, and both suppliers `up`. The hotel response contains Holtin at 5340 from Supplier B and Radison at 5900 from Supplier A. Closing SSH does not stop the containers.
+
+For an existing instance using port 8080, prefix every Compose command with `HTTP_PORT=8080`, for example:
+
+```sh
+sudo HTTP_PORT=8080 docker compose -f compose.ec2.yaml up --build --wait --wait-timeout 180
+curl --fail http://127.0.0.1:8080/health
+```
+
+Keep that port setting consistent for later updates; alternatively put `HTTP_PORT=8080` in a private `.env` in this checkout. `HTTP_BIND_ADDRESS` defaults to `0.0.0.0`; set it to `127.0.0.1` when an existing reverse proxy on the same host handles public traffic.
+
+### 5. Verify the public API and Postman collection
+
+Open `http://YOUR_EC2_PUBLIC_IP/health` and `http://YOUR_EC2_PUBLIC_IP/api/hotels?city=delhi` from your computer. Add `:8080` when using that port. If local curl succeeds but the public URL does not, check the security group, public IP, subnet routing, and host firewall.
+
+In Postman, import `postman/hotel-offer-orchestrator.postman_collection.json`, set `baseUrl` to `http://YOUR_EC2_PUBLIC_IP` (or the port-8080 URL), set `supplierDown=none`, and run the collection. The healthy run should pass 75 requests and 302 assertions. `GET /internal/probe` must return 404 on this public configuration.
+
+This direct-IP demo uses HTTP. For HTTPS, connect a domain to the instance and configure a TLS reverse proxy such as Caddy or Nginx; bind the app to loopback behind it. TLS/domain setup is separate and is not automated here.
+
+### 6. Update, troubleshoot, and remove the demo
+
+```sh
+git pull --ff-only
+sudo docker compose -f compose.ec2.yaml up --build --wait --wait-timeout 180
+sudo docker compose -f compose.ec2.yaml logs --tail 100 app redis
+```
+
+If a build or startup fails, inspect logs before changing anything. A small VM can run out of memory or disk; use `free -h` and `df -h` to diagnose. Do not publish logs containing credentials.
+
+To stop only this application:
+
+```sh
+sudo docker compose -f compose.ec2.yaml down
+```
+
+Stopping containers does not stop EC2 billing. When the demonstration is over, terminate this project's dedicated EC2 instance in the AWS console and review any remaining EBS volumes, snapshots, or public-IP allocations. Leave your other project's resources alone. A stopped instance can still incur storage charges, and its public IP can change when started again. Temporal history and Redis offers are ephemeral; this remains an assessment demo.
