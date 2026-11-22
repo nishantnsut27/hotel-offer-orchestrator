@@ -4,6 +4,8 @@ Compare two mock hotel suppliers using TypeScript, Express, Temporal, and Redis.
 
 Repository: https://github.com/nishantnsut27/hotel-offer-orchestrator
 
+Live assessment demo: [service](https://hotelapi.nishantraj.me), [health](https://hotelapi.nishantraj.me/health), and [filtered hotel search](https://hotelapi.nishantraj.me/api/hotels?city=delhi&minPrice=5000&maxPrice=6000). Caddy manages the HTTPS certificate and redirects HTTP to HTTPS. Availability depends on the credit-funded EC2 instance remaining active.
+
 ## Docker quickstart
 
 Prerequisites: Git and a running Docker Engine with Docker Compose v2 (`--wait` support), Linux containers, and internet access for pinned image/package downloads. On Windows, use Docker Desktop with its WSL 2 backend. Host ports 4000, 6379, and 7233 must be available. Node.js 22 LTS (22.13 or newer within 22.x) and npm are needed for CLI verification and host development, but Docker builds include Node.
@@ -294,7 +296,7 @@ For the combined profile use `docker compose --profile demo down`. Temporal deve
 
 `compose.ec2.yaml` runs the existing combined demo (API, worker, and loopback-only Temporal) plus a private Redis container. Only HTTP is published, on host port 80 by default. Redis and Temporal have no published host ports, the infrastructure diagnostic is disabled, logs rotate, and both containers restart after a Docker/host restart. The Compose project has a separate name from the local deployment.
 
-The configuration is verified with Docker locally. Creating an EC2 instance, configuring AWS networking, and testing a public URL must still be done in your AWS account; this repository does not provision resources or claim a verified AWS deployment.
+The configuration was verified locally and deployed on 2026-11-22 to an owner-created `t3.small` instance running Ubuntu 24.04 in Sydney (`ap-southeast-2`). A clean Docker build, real Temporal/Redis hotel searches, public health checks, and the full healthy Postman collection passed: 75 requests, 302 assertions, zero failures. This verifies the assessment demo, not sustained production capacity. The repository does not provision AWS resources.
 
 ### Choose a hosting option
 
@@ -386,7 +388,7 @@ Open `http://YOUR_EC2_PUBLIC_IP/health` and `http://YOUR_EC2_PUBLIC_IP/api/hotel
 
 In Postman, import `postman/hotel-offer-orchestrator.postman_collection.json`, set `baseUrl` to `http://YOUR_EC2_PUBLIC_IP` (or the port-8080 URL), set `supplierDown=none`, and run the collection. The healthy run should pass 75 requests and 302 assertions. `GET /internal/probe` must return 404 on this public configuration.
 
-This direct-IP demo uses HTTP. For HTTPS, connect a domain to the instance and configure a TLS reverse proxy such as Caddy or Nginx; bind the app to loopback behind it. TLS/domain setup is separate and is not automated here.
+The base configuration uses HTTP. The optional HTTPS overlay below adds Caddy, automatic certificates, and HTTP redirects for a domain you control.
 
 ### 6. Update, troubleshoot, and remove the demo
 
@@ -405,3 +407,44 @@ sudo docker compose -f compose.ec2.yaml down
 ```
 
 Stopping containers does not stop EC2 billing. When the demonstration is over, terminate this project's dedicated EC2 instance in the AWS console and review any remaining EBS volumes, snapshots, or public-IP allocations. Leave your other project's resources alone. A stopped instance can still incur storage charges, and its public IP can change when started again. Temporal history and Redis offers are ephemeral; this remains an assessment demo.
+
+## HTTPS with your own domain
+
+`compose.ec2.https.yaml` adds pinned Caddy 2.11.9 to the EC2 deployment. Caddy owns public ports 80 and 443, redirects HTTP to the configured hostname, and proxies HTTPS to `app:4000` on the private Docker network. The overlay removes the application's host port mapping using Compose's `!reset` merge tag. Redis and Temporal remain private. Caddy stores certificate/account data in named volumes and automatically renews certificates; no certificate renewal cron is required.
+
+Verified on 2026-11-22 at `https://hotelapi.nishantraj.me`: trusted Let's Encrypt certificate, full component health, correct hotel search, HTTP redirects, and 75 Postman requests / 302 assertions / zero failures. The certificate was retained after restarting Caddy.
+
+Use Docker Compose 2.24.4 or newer. DNS and security-group changes happen in your provider accounts; the repository supplies the proxy configuration.
+
+1. Point an **A record** for your chosen hostname to the EC2 public IPv4 address. For this demo, Namecheap **Domain List → Manage → Advanced DNS → Host Records** contains `A Record`, host `hotelapi`, value `13.236.95.4`, TTL `Automatic`, yielding `hotelapi.nishantraj.me`. Retain the domain's other records.
+2. Allow inbound **HTTP/TCP 80** and **HTTPS/TCP 443** in this instance's security group. Port 80 handles certificate validation and HTTP redirects. Keep SSH restricted to your IP.
+3. Create or edit the private `.env` file in the deployment checkout, preserving any existing settings, and add:
+
+   ```dotenv
+   PUBLIC_HOSTNAME=hotelapi.nishantraj.me
+   ```
+
+4. Start both Compose files together:
+
+   ```sh
+   sudo docker compose -f compose.ec2.yaml -f compose.ec2.https.yaml up --build --wait --wait-timeout 180
+   sudo docker compose -f compose.ec2.yaml -f compose.ec2.https.yaml logs --tail 50 caddy
+   curl --fail https://hotelapi.nishantraj.me/health
+   curl --fail "https://hotelapi.nishantraj.me/api/hotels?city=delhi&minPrice=5000&maxPrice=6000"
+   ```
+
+   Certificate issuance can take a short time after container startup. Verify normal certificate validation without curl's `--insecure` option. If issuance fails, inspect Caddy logs and check public DNS, both inbound ports, any stale IPv6 record, and restrictive CAA records.
+
+5. Set Postman's `baseUrl` to `https://hotelapi.nishantraj.me` and `supplierDown=none`; run the complete collection.
+
+Use **both Compose files** for subsequent updates, restarts, and shutdown:
+
+```sh
+git pull --ff-only
+sudo docker compose -f compose.ec2.yaml -f compose.ec2.https.yaml up --build --wait --wait-timeout 180
+sudo docker compose -f compose.ec2.yaml -f compose.ec2.https.yaml ps
+```
+
+To stop this deployment, use `sudo docker compose -f compose.ec2.yaml -f compose.ec2.https.yaml down`. Retain the Caddy volumes so certificate/account data survives container recreation. Starting only the base file while Caddy occupies port 80 causes a port conflict. If EC2 assigns a new public IP after a stop/start, update the hostname's A record before expecting HTTPS to work.
+
+References: [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https), [Caddy Docker deployment](https://caddyserver.com/docs/running#docker-compose), and [Compose merge/reset behavior](https://docs.docker.com/reference/compose-file/merge/).

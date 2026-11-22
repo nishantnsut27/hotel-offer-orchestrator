@@ -1,0 +1,7 @@
+http:// {
+	redir https://{$PUBLIC_HOSTNAME}{uri} permanent
+}
+
+{$PUBLIC_HOSTNAME} {
+	reverse_proxy app:4000
+}
